@@ -3,10 +3,12 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import declarative_base, relationship, joinedload, Session
 from sqlalchemy import Column, Integer, Float, String, ForeignKey
 import jwt
+import ollama
+import httpx
 
 from dataModel import (
     AuthorModel, BookModel, BookOut, AuthorOut,
-    UserCreate, UserResponse, LoginRequest,
+    UserCreate, UserResponse, LoginRequest,ChatRequest,ChatResponse
 )
 from config import engine, session
 from security import (
@@ -291,3 +293,50 @@ def delete_book(
     db.delete(book)
     db.commit()
     return {"detail": "Book deleted"}
+
+
+BASE_SYSTEM = "You are a friendly Python tutor. Keep answers short and clear."
+MODEL = "llama3.2:1b"
+
+
+
+@app.post("/chat",response_model=ChatResponse)
+def chat(chat_request: ChatRequest,
+         current_user: User = Depends(get_current_user)):
+
+    messages = [
+        {"role": "system", "content": BASE_SYSTEM},
+        {"role": "user", "content": chat_request.message},
+    ]
+
+    try:
+        response = ollama.chat(model=MODEL, messages=messages)
+
+    except ollama.ResponseError as e:
+        # Ollama answered, but with an error (for example, model not found)
+        print(f"Ollama response error: {type(e)} status={e.status_code} {e}")
+        if e.status_code == 404:
+            # our config is wrong: retrying will never help
+            raise HTTPException(status_code=500, detail="AI service is misconfigured.")
+        raise HTTPException(
+            status_code=503,
+            detail="The AI service is unavailable right now. Please try again later.",
+        )
+
+    except (ConnectionError, httpx.ConnectError) as e:
+        # Ollama is not running or unreachable
+        print(f"Ollama connection error: {type(e)} {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="The AI service is unavailable right now. Please try again later.",
+        )
+
+    except Exception as e:
+        # safety net for anything unexpected
+        print(f"Unexpected error: {type(e)} {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="The AI service is unavailable right now. Please try again later.",
+        )
+
+    return {"reply": response["message"]["content"]}

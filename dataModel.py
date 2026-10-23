@@ -38,3 +38,9 @@ class UserResponse(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+
+class ChatRequest(BaseModel):
+    message : str = Field(min_length=1, max_length=2000)
+
+class ChatResponse(BaseModel):
+    reply: str
